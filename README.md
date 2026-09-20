@@ -8,6 +8,16 @@ There are no placeholder buttons, no invented statistics, and no silent fallback
 when a capability does not exist yet, or a provider refuses a request, the interface
 says so in plain words and names the next step.
 
+```bash
+git clone https://github.com/delter-technologies/delter-ai.git
+```
+
+**Contents** — [Status](#what-is-built-and-working) · [Stack](#stack) ·
+[Quick start](#quick-start) · [Environment](#environment) ·
+[AI layer](#how-the-ai-layer-behaves) · [Architecture](#architecture-notes) ·
+[Deployment](#deploying-this-repository) · [Layout](#project-layout) ·
+[Security](#security-notes)
+
 ---
 
 ## What is built and working
@@ -46,7 +56,11 @@ Integrations & API, and Billing. Each of these currently renders an explicit
 
 ## Quick start
 
+Requires Node 20.9 or newer.
+
 ```bash
+git clone https://github.com/delter-technologies/delter-ai.git
+cd delter-ai
 npm install
 cp .env.example .env       # then fill in SESSION_SECRET and at least one provider key
 npm run setup              # prisma generate + db push + create runtime dirs
@@ -54,9 +68,14 @@ npm run dev                # http://localhost:3000
 ```
 
 `npm run setup` creates `data/db.sqlite` and `data/storage/`. Both are git-ignored:
-the database and every uploaded file live under `data/`.
+the database and every uploaded file live under `data/`, and nothing in `data/` is
+needed to run the app — a fresh clone builds its own empty database.
 
-Other scripts: `npm run build`, `npm start`, `npm run typecheck`, `npm run db:studio`.
+Verified from a clean checkout on Node 20: `npm run setup` creates the database and
+generates the client, `npm run typecheck` reports no errors, and `npm run build`
+completes with every route.
+
+Other scripts: `npm start`, `npm run db:push`, `npm run db:studio`.
 
 ---
 
@@ -122,10 +141,21 @@ output limit" instead of presenting a truncated answer as complete.
 
 ---
 
-## Deployment
+## Deploying this repository
 
-`npm run build` passes (Prisma client generation is part of the build script, so the
-git-ignored generated client is produced on the host).
+`npm run build` passes, and the build script runs `prisma generate` first, so the
+git-ignored Prisma client is produced on the host rather than committed.
+
+### On Vercel
+
+1. [vercel.com/new](https://vercel.com/new) → import `delter-technologies/delter-ai`
+2. Framework preset: **Next.js** (auto-detected). Build command `npm run build`,
+   output directory `.next` — both defaults, nothing to override.
+3. Add the environment variables from the table above. `SESSION_SECRET` and
+   `DATABASE_URL` are mandatory; at least one provider key is required for live AI.
+4. Deploy.
+
+Two changes are required before a serverless deploy actually holds data:
 
 Two things change when moving off a machine with a real filesystem:
 
@@ -137,13 +167,17 @@ Two things change when moving off a machine with a real filesystem:
    Swap its three functions (`storeFile`, `readFileBytes`, `deleteStoredFile`) for an
    S3/R2/Blob driver; callers are unaffected.
 
-Alternatively, run it as a plain Node server (`npm start`) on any host with a persistent
-volume — then SQLite and local uploads both keep working, and long streaming responses
-are not subject to serverless function timeouts. Note that `src/app/api/ai/stream`
-declares `maxDuration = 300`, which hosts clamp to their own plan limits.
+### Or as a plain Node server
 
-AI model access is never included by a host: at least one provider key with credit is
-required for live responses.
+Run `npm start` on any host with a persistent volume (Railway, Fly.io, Render, a VPS).
+SQLite and local uploads both keep working unchanged, and long streaming responses are
+not subject to serverless function timeouts — `src/app/api/ai/stream` declares
+`maxDuration = 300`, which serverless hosts clamp to their own plan limits.
+
+Either way, AI model access is never included by a host: at least one provider key
+**with credit** is required for live responses. A key that authenticates but has no
+balance produces an explicit billing message in the UI, not a silent failure — check it
+from Settings → Appearance & AI → Providers → Test.
 
 ---
 
