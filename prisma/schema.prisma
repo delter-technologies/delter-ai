@@ -1,0 +1,232 @@
+// Delter AI — persistent data model
+//
+// Ownership is the spine of this schema: every user-owned row carries `userId`,
+// and every server-side query is scoped by it. That is what makes
+// "User A can never reach User B's data" a database-level guarantee rather than
+// a UI convention.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  name           String?
+  /// How the user wants to be addressed inside the workspace.
+  displayName    String?
+  emailVerified  Boolean  @default(false)
+  /// Gates the onboarding flow. Set true the moment onboarding completes so a
+  /// returning user is never shown it again.
+  onboardedAt    DateTime?
+  /// Free-form answers from onboarding, used to shape AI context.
+  mainPurpose    String?
+  interests      String?
+  theme          String   @default("system") // system | light | dark
+  defaultModel   String?
+  /// Reserved for the future unified Delter Account (Delter AI → WebShare → …).
+  /// Nullable today; a central identity provider can claim an account later
+  /// without breaking local email/password auth.
+  delterAccountId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  sessions         Session[]
+  passwordResets   PasswordResetToken[]
+  projects         Project[]
+  conversations    Conversation[]
+  messages         Message[]
+  files            FileAsset[]
+  codeFiles        CodeFile[]
+  usageEvents      UsageEvent[]
+
+  @@index([delterAccountId])
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  /// Opaque random token. Only its SHA-256 hash is stored, so a database leak
+  /// does not hand out usable session cookies.
+  tokenHash    String    @unique
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime
+  /// True once the user ticks "keep me signed in" — extends expiry.
+  remember     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  userAgent    String?
+  ipHash       String?
+  revokedAt    DateTime?
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Project {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  /// Free-form context handed to the AI for every conversation in this project.
+  instructions String?
+  /// e.g. web | writing | data | research | other. Drives Code Studio preview support.
+  kind        String    @default("general")
+  pinned      Boolean   @default(false)
+  archivedAt  DateTime?
+  lastOpenedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  conversations Conversation[]
+  files         FileAsset[]
+  codeFiles     CodeFile[]
+
+  @@index([userId, archivedAt, updatedAt])
+}
+
+model Conversation {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Null for a standalone chat; set when the conversation belongs to a project.
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String    @default("New chat")
+  /// chat | code — `code` conversations back the Code Studio assistant panel.
+  kind        String    @default("chat")
+  provider    String?
+  model       String?
+  lastMessageAt DateTime @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  messages Message[]
+  /// Files the user explicitly attached as context (not every file they own).
+  attachedFiles ConversationFile[]
+
+  @@index([userId, lastMessageAt])
+  @@index([projectId, kind])
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String // user | assistant | system | tool
+  content        String
+  /// Set when generation failed, so the UI can offer a real retry on that message.
+  error          String?
+  provider       String?
+  model          String?
+  /// True while the assistant response is still streaming.
+  pending        Boolean   @default(false)
+  promptTokens   Int?
+  completionTokens Int?
+  totalTokens    Int?
+  durationMs     Int?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([conversationId, createdAt])
+}
+
+/// Explicit conversation ⇄ file context links.
+model ConversationFile {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  fileId         String
+  file           FileAsset @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+
+  @@unique([conversationId, fileId])
+  @@index([fileId])
+}
+
+model FileAsset {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  name        String
+  /// Path relative to the storage root, e.g. "u123/ab34….pdf".
+  storagePath String
+  mimeType    String
+  size        Int
+  /// "text" files get an extracted preview so the AI can read them as context.
+  extractable Boolean   @default(false)
+  textContent String?
+  sha256      String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  conversations ConversationFile[]
+
+  @@index([userId, createdAt])
+  @@index([projectId])
+}
+
+/// Source files authored in Code Studio. Contents live here, not on the host
+/// filesystem, so a project is portable and fully persisted.
+model CodeFile {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Project-relative POSIX path, e.g. "src/app.tsx".
+  path      String
+  content   String    @default("")
+  language  String    @default("text")
+  /// Sort order inside the explorer.
+  position  Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([projectId, path])
+  @@index([userId])
+}
+
+/// Metered operations. Feeds the Usage screen today and subscription
+/// entitlement later — the backend owns this data, never the frontend.
+model UsageEvent {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        String // ai.request | image.generation | file.upload | code.file.save | …
+  provider    String?
+  model       String?
+  inputTokens Int       @default(0)
+  outputTokens Int      @default(0)
+  totalTokens Int       @default(0)
+  bytes       Int       @default(0)
+  status      String    @default("success") // success | error
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([kind])
+}

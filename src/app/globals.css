@@ -1,0 +1,399 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * Delter AI — design tokens
+ *
+ * Restrained and premium: one neutral scale, one accent, no gradients,
+ * no glass, no glow, no decorative motion. Colour is used to encode
+ * state (success / warning / danger), never for decoration.
+ * ------------------------------------------------------------------ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+}
+
+:root {
+  /* Light theme */
+  --bg: #ffffff;
+  --bg-subtle: #f7f8f9;
+  --bg-muted: #f1f3f5;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --border: #e3e6ea;
+  --border-strong: #cfd4da;
+  --text: #14181d;
+  --text-secondary: #4c5661;
+  --text-muted: #7b848f;
+  --text-faint: #9aa2ac;
+
+  --accent: #2f6feb;
+  --accent-hover: #2660d4;
+  --accent-soft: #eaf1fe;
+  --accent-text: #1c4fbb;
+
+  --success: #157347;
+  --success-soft: #e6f4ec;
+  --warning: #9a6700;
+  --warning-soft: #fdf3d8;
+  --danger: #c0392b;
+  --danger-soft: #fdeceb;
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-md: 0 2px 8px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.12);
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0c0e11;
+  --bg-subtle: #101317;
+  --bg-muted: #161a1f;
+  --surface: #13171c;
+  --surface-raised: #181d23;
+  --border: #232a32;
+  --border-strong: #333c46;
+  --text: #e9edf2;
+  --text-secondary: #aeb8c3;
+  --text-muted: #87919c;
+  --text-faint: #6b747e;
+
+  --accent: #4c8dff;
+  --accent-hover: #6ba0ff;
+  --accent-soft: #16233a;
+  --accent-text: #9dc0ff;
+
+  --success: #47b881;
+  --success-soft: #12291f;
+  --warning: #e0b252;
+  --warning-soft: #2a2313;
+  --danger: #f0736a;
+  --danger-soft: #2c1614;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-bg-muted: var(--bg-muted);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-muted);
+  --color-fg-faint: var(--text-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-text: var(--accent-text);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+/* ------------------------------------------------------------------ *
+ * Base
+ * ------------------------------------------------------------------ */
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* No horizontal overflow anywhere in the product, at any width. */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+h1, h2, h3, h4, h5 {
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+p { margin: 0; }
+a { color: inherit; }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Scrollbars: quiet, and consistent across surfaces. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: var(--text-faint); }
+
+/* ------------------------------------------------------------------ *
+ * Motion — one short duration, used only to communicate state change.
+ * ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Reusable pieces
+ * ------------------------------------------------------------------ */
+
+@utility surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+@utility card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+@utility label-caps {
+  font-size: var(--text-2xs);
+  line-height: 1rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* Keyboard focus ring for interactive rows in lists. */
+@utility focus-row {
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * CodeMirror — themed to match Delter AI rather than left at defaults.
+ * ------------------------------------------------------------------ */
+
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+  background: var(--bg);
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: var(--font-mono);
+  line-height: 1.65;
+  padding-bottom: 40vh; /* room to scroll the last line above the fold */
+}
+.cm-gutters {
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.cm-activeLineGutter {
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+}
+.cm-activeLine {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.cm-selectionBackground,
+.cm-editor ::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent) !important;
+}
+.cm-cursor {
+  border-left-color: var(--accent);
+}
+.cm-tooltip {
+  background: var(--surface-raised) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-md);
+}
+.cm-panels {
+  background: var(--bg-subtle) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+.cm-panels input,
+.cm-panels button {
+  font-size: 12.5px;
+}
+.cm-searchMatch {
+  background: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+.cm-searchMatch-selected {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendered assistant Markdown
+ * ------------------------------------------------------------------ */
+
+.prose-delter {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.prose-delter > *:first-child { margin-top: 0; }
+.prose-delter > *:last-child { margin-bottom: 0; }
+.prose-delter p { margin: 0 0 0.85em; }
+.prose-delter h1, .prose-delter h2, .prose-delter h3, .prose-delter h4 {
+  margin: 1.5em 0 0.6em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.prose-delter h1 { font-size: 1.35em; }
+.prose-delter h2 { font-size: 1.2em; }
+.prose-delter h3 { font-size: 1.07em; }
+.prose-delter h4 { font-size: 1em; }
+.prose-delter ul, .prose-delter ol { margin: 0 0 0.85em; padding-left: 1.4em; }
+.prose-delter li { margin: 0.3em 0; }
+.prose-delter li > ul, .prose-delter li > ol { margin: 0.3em 0 0; }
+.prose-delter a {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent-text) 40%, transparent);
+  text-underline-offset: 2px;
+}
+.prose-delter a:hover { text-decoration-color: currentColor; }
+.prose-delter strong { font-weight: 650; color: var(--text); }
+.prose-delter blockquote {
+  margin: 0.9em 0;
+  padding: 0.15em 0 0.15em 1em;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.prose-delter hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+.prose-delter code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 0.1em 0.35em;
+}
+.prose-delter pre {
+  margin: 0.9em 0;
+  padding: 0;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.prose-delter pre code {
+  display: block;
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 12.75px;
+  line-height: 1.6;
+  white-space: pre;
+}
+.prose-delter table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9em 0;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+}
+.prose-delter th, .prose-delter td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.prose-delter th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+}
+.prose-delter img { max-width: 100%; height: auto; border-radius: var(--radius-md); }
+
+/* ------------------------------------------------------------------ *
+ * Preview loading bar
+ * ------------------------------------------------------------------ */
+
+@keyframes delter-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+
+@utility progress-slide {
+  animation: delter-slide 1s linear infinite;
+}
