@@ -52,7 +52,7 @@ export const GET = handleRoute(async (request: Request, context: RouteContext<Pa
     // serving an empty 200.
     throw new ApiError(
       410,
-      `The stored copy of “${file.name}” is missing from this server's storage. Its metadata is still here, but the contents cannot be downloaded.`,
+      `The stored copy of “${file.name}” is missing from storage. Its metadata is still here, but the contents cannot be downloaded.`,
     );
   }
 

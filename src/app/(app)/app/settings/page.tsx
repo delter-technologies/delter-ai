@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSession, listActiveSessions } from "@/lib/auth";
 import { usageSummary } from "@/lib/usage";
-import { storageUsageBytes } from "@/lib/storage";
+import { storageDescription, storageUsageBytes } from "@/lib/storage";
 import { allModels, availableModels, providerStatuses, resolveModel } from "@/lib/ai/registry";
 import { describeUserAgent } from "@/lib/device";
 import { SettingsView, type SettingsData } from "@/components/settings/SettingsView";
@@ -123,6 +123,7 @@ export default async function SettingsPage() {
         byDay: usage.byDay,
       },
       storage: {
+        backend: storageDescription(),
         uploads: usage.uploads,
         bytesOnDisk: diskBytes,
         bytesRecorded: usage.bytesStored,

@@ -26,8 +26,32 @@ export const config = {
   sessionSecret: process.env.SESSION_SECRET || "delter-ai-dev-secret-do-not-use-in-production",
   isProduction: process.env.NODE_ENV === "production",
   maxUploadBytes: (Number(process.env.MAX_UPLOAD_MB) || 25) * 1024 * 1024,
-  /** Absolute path of the on-disk storage root for user uploads. */
+  /** Absolute path of the on-disk storage root for user uploads (local driver). */
   storageRoot: process.env.STORAGE_ROOT || `${process.cwd()}/data/storage`,
+  /**
+   * Where uploaded file bytes live.
+   *
+   * `local` writes under `storageRoot` — right for a machine or a container with
+   * a persistent volume. `s3` talks to any S3-compatible object store
+   * (Cloudflare R2, Supabase Storage, AWS S3, MinIO) and is what a serverless
+   * host needs, because its filesystem is read-only and per-request.
+   *
+   * Only the driver changes: metadata stays in the database either way, and the
+   * key recorded on a FileAsset row means the same thing in both.
+   */
+  storageDriver: (process.env.STORAGE_DRIVER || "local") as "local" | "s3",
+  s3: {
+    endpoint: process.env.S3_ENDPOINT || undefined,
+    region: process.env.S3_REGION || "auto",
+    bucket: process.env.S3_BUCKET || "",
+    accessKeyId: process.env.S3_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || "",
+    /** Optional key prefix, so one bucket can hold several environments. */
+    prefix: process.env.S3_PREFIX || "",
+    // Path-style addressing is what R2, Supabase and MinIO expect; virtual-host
+    // style needs wildcard DNS. Override only if your bucket requires it.
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "false",
+  },
   /**
    * Default cap on AI output tokens for a single request.
    *

@@ -2,7 +2,7 @@
   "name": "delter-ai",
   "version": "0.6.0",
   "private": true,
-  "description": "Delter AI \u2014 unified AI productivity and creation workspace by Delter Technologies.",
+  "description": "Delter AI — unified AI productivity and creation workspace by Delter Technologies.",
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
     "build": "prisma generate && next build",
@@ -15,6 +15,7 @@
     "setup": "prisma generate && prisma db push && node scripts/ensure-runtime-dirs.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1136.0",
     "@codemirror/commands": "6.9.0",
     "@codemirror/lang-css": "6.3.1",
     "@codemirror/lang-html": "6.4.9",

@@ -46,7 +46,10 @@ Integrations & API, and Billing. Each of these currently renders an explicit
 ## Stack
 
 - **Next.js 16** (App Router, Turbopack) with **React 19** and **TypeScript**
-- **Prisma 6** on **SQLite** (single file, zero setup; see [Deployment](#deployment))
+- **Prisma 6** on **PostgreSQL** — no raw SQL anywhere, so the provider is one line
+  in `prisma/schema.prisma` (this codebase ran on SQLite during development)
+- **@aws-sdk/client-s3** behind a storage-driver interface, so uploads go to local
+  disk or to any S3-compatible object store without touching a caller
 - **Tailwind CSS 4** with a small hand-rolled component set (`Button`, `Field`, `Modal`, `Menu`, `States`, `Markdown`)
 - **CodeMirror 6** for the code editor
 - **zod** for validation, **bcryptjs** for password hashing
@@ -62,18 +65,27 @@ Requires Node 20.9 or newer.
 git clone https://github.com/delter-technologies/delter-ai.git
 cd delter-ai
 npm install
-cp .env.example .env       # then fill in SESSION_SECRET and at least one provider key
+
+# A PostgreSQL server to point at. Docker is the quickest locally; a free Neon or
+# Supabase database works identically (see DEPLOY.md).
+docker run --name delter-pg -e POSTGRES_PASSWORD=delter -e POSTGRES_DB=delter_ai \
+  -p 5432:5432 -d postgres:17
+
+cp .env.example .env       # DATABASE_URL, SESSION_SECRET, at least one provider key
 npm run setup              # prisma generate + db push + create runtime dirs
 npm run dev                # http://localhost:3000
 ```
 
-`npm run setup` creates `data/db.sqlite` and `data/storage/`. Both are git-ignored:
-the database and every uploaded file live under `data/`, and nothing in `data/` is
-needed to run the app — a fresh clone builds its own empty database.
+Uploads default to local disk under `data/storage/` (git-ignored). Set
+`STORAGE_DRIVER=s3` to put them in an object store instead — required on a
+serverless host, where the filesystem is read-only and per-request.
 
-Verified from a clean checkout on Node 20: `npm run setup` creates the database and
-generates the client, `npm run typecheck` reports no errors, and `npm run build`
-completes with every route.
+Verified on Node 20 against PostgreSQL 17: `npm run setup` creates the schema,
+`npm run typecheck` reports no errors, `npm run build` completes with every route,
+and **both storage drivers** were exercised end to end (upload → download → storage
+meter → delete) against a real S3-compatible endpoint. The failure path is verified
+too: when the store refuses a write, the upload is reported as failed with the
+store's own reason and **no** `FileAsset` row is created.
 
 Other scripts: `npm start`, `npm run db:push`, `npm run db:studio`.
 
@@ -83,13 +95,17 @@ Other scripts: `npm start`, `npm run db:push`, `npm run db:studio`.
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Prisma datasource. Defaults to `file:../data/db.sqlite`. |
+| `DATABASE_URL` | PostgreSQL connection string. On a serverless host use the **pooled** URL (Neon's `-pooler` host): per-request scaling exhausts a direct connection limit. |
 | `SESSION_SECRET` | Signs and verifies session cookies. Required in production; the dev fallback is deliberately labelled as unsafe. |
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider credentials, read server-side at request time. Provide at least one. |
 | `OPENROUTER_APP_NAME` / `OPENROUTER_APP_URL` | Attribution headers OpenRouter asks for. |
 | `MAX_UPLOAD_MB` | Upload cap (default 25). |
 | `AI_MAX_OUTPUT_TOKENS` | Default output cap per request (default 2048). See below — this one matters for money. |
 | `RESET_EMAIL_URL` | Where password-reset links point. Unset means no email delivery, which the UI states plainly. |
+| `STORAGE_DRIVER` | `local` (default, disk under `STORAGE_ROOT`) or `s3` (any S3-compatible object store). An unrecognised value throws rather than silently falling back to disk. |
+| `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` | Object store location. R2 uses `https://<account-id>.r2.cloudflarestorage.com` with region `auto`; omit the endpoint for AWS S3. |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Object store credentials. Server-side only; never echoed in an error message or in the Settings description. |
+| `S3_PREFIX` / `S3_FORCE_PATH_STYLE` | Optional key prefix (one bucket, several environments) and addressing style (path-style is what R2, Supabase and MinIO expect). |
 
 ### Why `AI_MAX_OUTPUT_TOKENS` exists
 
@@ -137,11 +153,17 @@ output limit" instead of presenting a truncated answer as complete.
 - **API contract.** Every endpoint answers `{ ok: true, data }` or
   `{ ok: false, error: { message, … } }`; `src/lib/client/api.ts` unwraps that once so
   screens deal in real values and the server's own error wording.
-- **Uploads** are written to local disk by `src/lib/storage.ts` (see Deployment).
+- **Uploads sit behind a driver interface.** `src/lib/storage.ts` keeps metadata
+  handling, sanitising and text extraction; `src/lib/storage-drivers/` holds the
+  `local` and `s3` implementations. A driver must confirm bytes landed before the
+  caller writes a row, so a failed upload can never look like a successful one.
 
 ---
 
 ## Deploying this repository
+
+Full step-by-step instructions, including free-tier database and object-storage
+setup, live in **[DEPLOY.md](DEPLOY.md)**. The short version:
 
 `npm run build` passes, and the build script runs `prisma generate` first, so the
 git-ignored Prisma client is produced on the host rather than committed.
@@ -151,33 +173,31 @@ git-ignored Prisma client is produced on the host rather than committed.
 1. [vercel.com/new](https://vercel.com/new) → import `delter-technologies/delter-ai`
 2. Framework preset: **Next.js** (auto-detected). Build command `npm run build`,
    output directory `.next` — both defaults, nothing to override.
-3. Add the environment variables from the table above. `SESSION_SECRET` and
-   `DATABASE_URL` are mandatory; at least one provider key is required for live AI.
-4. Deploy.
+3. Add the environment variables: `DATABASE_URL` (pooled Postgres),
+   `SESSION_SECRET`, `STORAGE_DRIVER=s3` plus the `S3_*` values, and at least one
+   AI provider key.
+4. Deploy, then run the post-deploy checklist in DEPLOY.md.
 
-Two changes are required before a serverless deploy actually holds data:
+The schema is already PostgreSQL and the object-storage driver is already written,
+so deploying is configuration, not a rewrite. Two things still deserve attention:
 
-Two things change when moving off a machine with a real filesystem:
-
-1. **SQLite → Postgres.** Serverless filesystems are read-only and ephemeral. Point
-   `datasource db` at `postgresql`, set `DATABASE_URL`, run `prisma db push`. The app
-   contains no raw SQL and no SQLite-specific date handling, so no query changes are
-   needed.
-2. **Local uploads → object storage.** `src/lib/storage.ts` writes with `node:fs`.
-   Swap its three functions (`storeFile`, `readFileBytes`, `deleteStoredFile`) for an
-   S3/R2/Blob driver; callers are unaffected.
+- **Streaming duration.** `src/app/api/ai/stream` declares `maxDuration = 300`,
+  which serverless hosts clamp to their plan limit (10 s on Vercel Hobby, 60 s with
+  Fluid compute). A long generation can be cut off at that boundary.
+- **Migrations.** The schema is applied with `prisma db push`, which is right for
+  development. Before a production database holds data you care about, adopt
+  `prisma migrate dev` → `prisma migrate deploy` so changes are versioned.
 
 ### Or as a plain Node server
 
-Run `npm start` on any host with a persistent volume (Railway, Fly.io, Render, a VPS).
-SQLite and local uploads both keep working unchanged, and long streaming responses are
-not subject to serverless function timeouts — `src/app/api/ai/stream` declares
-`maxDuration = 300`, which serverless hosts clamp to their own plan limits.
+Run `npm start` on any host with a persistent volume (Railway, Fly.io, Render, a
+VPS). `STORAGE_DRIVER=local` keeps working there, no object store is needed, and
+long streaming responses are not subject to serverless function timeouts.
 
 Either way, AI model access is never included by a host: at least one provider key
 **with credit** is required for live responses. A key that authenticates but has no
-balance produces an explicit billing message in the UI, not a silent failure — check it
-from Settings → Appearance & AI → Providers → Test.
+balance produces an explicit billing message in the UI, not a silent failure — check
+it from Settings → Appearance & AI → Providers → Test.
 
 ---
 
@@ -191,6 +211,7 @@ src/lib/                 config, db, auth, api helpers, validation, storage, usa
                          tools registry, device descriptions
 src/lib/ai/              provider abstraction: registry, types, errors, context,
                          providers/{openrouter,openai,anthropic,demo}
+src/lib/storage-drivers/ local-disk and S3-compatible object storage drivers
 src/lib/code/            code file paths, languages, preview status, signed tokens
 src/app/                 routes: landing, auth, onboarding, (app) workspace, api
 src/components/          workspace shell, chat, code studio, files, projects,
@@ -207,6 +228,9 @@ src/components/          workspace shell, chat, code studio, files, projects,
   values are not reversible.
 - Redirect targets are validated (`safeNextPath`) against external hosts,
   protocol-relative URLs and `..` traversal in both raw and percent-decoded form.
+- Storage keys are server-generated (`<userId>/<fileId><ext>`) and resolved with a
+  containment check; object-store credentials never appear in an error message or in
+  the Settings storage description.
 
 ## License
 

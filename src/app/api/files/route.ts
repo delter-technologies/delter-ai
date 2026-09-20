@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { assertProjectOwnership, requireApiUser, ApiError } from "@/lib/auth";
 import { handleRoute, ok } from "@/lib/api";
 import { config, newId } from "@/lib/config";
-import { formatBytes, isTextFile, sanitiseFileName, storeFile } from "@/lib/storage";
+import { formatBytes, isTextFile, sanitiseFileName, storageFailureMessage, storeFile } from "@/lib/storage";
 import { recordUsage } from "@/lib/usage";
 import { ensureRuntimeDirs } from "@/lib/storage";
 
@@ -185,7 +185,7 @@ export const POST = handleRoute(async (request: Request) => {
     } catch (error) {
       console.error("[delter-ai] file write failed:", error);
       results.push({
-        error: { name: sanitised.name, message: "The file could not be saved to storage. Please retry." },
+        error: { name: sanitised.name, message: storageFailureMessage(error) },
       });
       continue;
     }

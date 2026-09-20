@@ -1,22 +1,31 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "@/lib/config";
+import { storageDriver } from "@/lib/storage-drivers";
+import { absoluteStoragePath } from "@/lib/storage-drivers/local";
 
 /**
  * File storage.
  *
  * Three things are deliberately kept apart, per the data model:
  *   - metadata   → FileAsset row (name, mime, size, project, hash)
- *   - contents   → bytes on disk under `data/storage/<userId>/<id>`
- *   - storage    → the path recorded on the metadata row
+ *   - contents   → bytes behind the storage driver (local disk or object store)
+ *   - storage    → the key recorded on the metadata row
  *
  * Nothing is written to a path derived from user input: the filename is
- * sanitised for display only, and the on-disk name is a server-generated id.
- * A row is never created unless the bytes are already on disk, so Delter AI
- * never claims an upload succeeded when it did not.
+ * sanitised for display only, and the stored name is a server-generated id.
+ * A row is never created unless the bytes are already stored, so Delter AI never
+ * claims an upload succeeded when it did not.
+ *
+ * The driver is chosen by STORAGE_DRIVER (`local` or `s3`). Everything above
+ * this module — the upload route, the download route, the storage meter — is
+ * identical either way, which is what makes moving to a serverless host a
+ * configuration change rather than a rewrite.
  */
+
+export { absoluteStoragePath };
+export { storageDescription } from "@/lib/storage-drivers";
 
 export const TEXT_EXTENSIONS = new Set([
   ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".ndjson",
@@ -73,20 +82,15 @@ export function isTextFile(name: string, mimeType: string | null): boolean {
   return false;
 }
 
-/** Relative storage path for a user's file. */
+/** Storage key for a user's file: `<userId>/<fileId><ext>`. */
 export function storagePathFor(userId: string, fileId: string, ext: string): string {
   const safeExt = /^\.[a-z0-9]{1,10}$/i.test(ext) ? ext.toLowerCase() : "";
   return path.posix.join(userId, `${fileId}${safeExt}`);
 }
 
-export function absoluteStoragePath(relativePath: string): string {
-  // Resolve then verify containment: belt and braces against path traversal.
-  const root = path.resolve(config.storageRoot);
-  const abs = path.resolve(root, relativePath);
-  if (abs !== root && !abs.startsWith(root + path.sep)) {
-    throw new Error("Refusing to resolve a storage path outside the storage root.");
-  }
-  return abs;
+/** Prefix under which one user's files live, in either driver. */
+export function storagePrefixFor(userId: string): string {
+  return `${userId}/`;
 }
 
 export type StoredFile = {
@@ -98,7 +102,12 @@ export type StoredFile = {
   truncatedText: boolean;
 };
 
-/** Persist bytes to disk. Throws if the write fails — the caller must not create a row. */
+/**
+ * Persist bytes through the configured driver.
+ *
+ * Throws if the write fails or cannot be confirmed — the caller must not create
+ * a FileAsset row in that case.
+ */
 export async function storeFile(
   userId: string,
   fileId: string,
@@ -106,13 +115,7 @@ export async function storeFile(
   opts: { name: string; ext: string; mimeType: string | null },
 ): Promise<StoredFile> {
   const relativePath = storagePathFor(userId, fileId, opts.ext);
-  const abs = absoluteStoragePath(relativePath);
-
-  await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, bytes);
-
-  // Confirm the bytes really landed before anything claims success.
-  const info = await stat(abs);
+  const stored = await storageDriver().put(relativePath, bytes, opts.mimeType);
 
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const extractable = isTextFile(opts.name, opts.mimeType);
@@ -135,7 +138,7 @@ export async function storeFile(
 
   return {
     storagePath: relativePath,
-    size: info.size,
+    size: stored.size,
     sha256,
     textContent,
     extractable: textContent !== null,
@@ -150,37 +153,41 @@ function containsNullBytes(buf: Buffer): boolean {
 }
 
 export async function readFileBytes(relativePath: string): Promise<Buffer | null> {
-  try {
-    return await readFile(absoluteStoragePath(relativePath));
-  } catch (error: any) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
+  return storageDriver().get(relativePath);
 }
 
 export async function deleteStoredFile(relativePath: string): Promise<boolean> {
   try {
-    await rm(absoluteStoragePath(relativePath), { force: true });
-    return true;
+    return await storageDriver().remove(relativePath);
   } catch {
     return false;
   }
 }
 
 export async function storageUsageBytes(userId: string): Promise<number> {
-  const dir = absoluteStoragePath(userId);
   try {
-    const entries = await (await import("node:fs/promises")).readdir(dir, { withFileTypes: true });
-    let total = 0;
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      const info = await stat(path.join(dir, entry.name)).catch(() => null);
-      if (info) total += info.size;
-    }
-    return total;
-  } catch {
+    return await storageDriver().usageBytes(storagePrefixFor(userId));
+  } catch (error) {
+    // A meter must never break the page it appears on. Report zero and log why.
+    console.error("[delter-ai] storage usage could not be measured:", error instanceof Error ? error.message : error);
     return 0;
   }
+}
+
+/**
+ * Why a write failed, in the driver's own words.
+ *
+ * A generic "could not be saved" is useless when the real cause is a missing
+ * bucket variable, a denied key or an unreachable endpoint — all of which the
+ * driver already knows precisely. The detail is capped so an SDK stack trace
+ * cannot swamp the upload list.
+ */
+export function storageFailureMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message.replace(/\s+/g, " ").trim() : "";
+  const base = "The file could not be saved to storage.";
+  if (!detail) return `${base} Please retry.`;
+  const clipped = detail.length > 300 ? `${detail.slice(0, 299)}…` : detail;
+  return `${base} ${clipped}`;
 }
 
 export function formatBytes(bytes: number): string {
@@ -191,7 +198,11 @@ export function formatBytes(bytes: number): string {
   return `${value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
 }
 
+/** Idempotent start-up work for the active driver (mkdir for local, config check for s3). */
 export async function ensureRuntimeDirs() {
-  await mkdir(config.storageRoot, { recursive: true });
-  await mkdir(path.resolve(process.cwd(), "data"), { recursive: true });
+  await storageDriver().prepare();
+  if (config.storageDriver === "local") {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(path.resolve(process.cwd(), "data"), { recursive: true });
+  }
 }

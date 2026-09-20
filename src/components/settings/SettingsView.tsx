@@ -55,6 +55,8 @@ export type SettingsUsage = {
     byDay: { date: string; requests: number; totalTokens: number }[];
   };
   storage: {
+    /** Where uploaded bytes actually live, in the driver's own words. */
+    backend: string;
     uploads: number;
     bytesOnDisk: number;
     bytesRecorded: number;

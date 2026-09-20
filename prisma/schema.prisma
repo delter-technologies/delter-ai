@@ -11,7 +11,11 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  // PostgreSQL: the same schema ran on SQLite during development, but a
+  // serverless host has no writable disk, so the deployed app needs a real
+  // database server. No query in this codebase is provider-specific — there is
+  // no raw SQL anywhere — so the switch is this line plus DATABASE_URL.
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

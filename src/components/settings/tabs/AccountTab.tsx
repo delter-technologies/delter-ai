@@ -96,9 +96,9 @@ export function AccountTab({
         </ul>
         <div className="mt-4">
           <Note>
-            Uploaded files are stored under this server's data directory in a folder named after your account id; code
-            files are text rows in the database. Everything is scoped to your account — every query filters by your
-            user id, so another signed-in user cannot reach it by changing an id in a URL.
+            Uploaded file bytes live in {usage.storage.backend}, keyed by your account id; code files are text rows in
+            the database. Everything is scoped to your account — every query filters by your user id, so another
+            signed-in user cannot reach it by changing an id in a URL.
           </Note>
         </div>
       </Section>
@@ -107,7 +107,7 @@ export function AccountTab({
         <Note tone="warning">
           Self-service account deletion is not part of this build, so there is no button for it here — Delter AI does
           not show controls that do nothing. Your data can be removed by deleting the rows for your account id and the
-          matching storage folder on the server; a signed-in session count of {sessions.length} is what would be
+          matching stored objects; a signed-in session count of {sessions.length} is what would be
           revoked at the same time.
         </Note>
       </Section>
