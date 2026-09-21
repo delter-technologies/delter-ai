@@ -1,3 +1,4 @@
+import { redactSecrets } from "@/lib/redact";
 import { ProviderError } from "./types";
 import type { ProviderId } from "./types";
 
@@ -171,9 +172,13 @@ function describeStatus(status: number, provider: ProviderId): FriendlyError | n
 }
 
 export function friendlyProviderError(error: unknown, provider: ProviderId): FriendlyError {
+  // A provider or SDK message can echo an API key, a signed URL or a connection
+  // string, and some branches below pass it straight through to the client.
+  // Redact once, up front, so no branch can leak it.
   if (error instanceof ProviderError) {
+    const raw = redactSecrets(error.message);
     // 1. What the provider actually said (billing, auth, model, context, rate).
-    const classified = classifyByDetail(error.message, provider);
+    const classified = classifyByDetail(raw, provider);
     if (classified) {
       return { ...classified, status: error.status };
     }
@@ -181,26 +186,27 @@ export function friendlyProviderError(error: unknown, provider: ProviderId): Fri
     const described = error.status ? describeStatus(error.status, provider) : null;
     // 3. Otherwise pass the provider's own message through rather than a guess.
     return {
-      message: described && /responded with HTTP/.test(error.message) ? described.message : (error.message || described?.message || "Unable to generate the response."),
+      message: described && /responded with HTTP/.test(raw) ? described.message : (raw || described?.message || "Unable to generate the response."),
       retryable: error.retryable || Boolean(described?.retryable),
       status: error.status,
     };
   }
 
   if (error instanceof Error) {
-    if (error.name === "AbortError" || /aborted/i.test(error.message)) {
+    const raw = redactSecrets(error.message);
+    if (error.name === "AbortError" || /aborted/i.test(raw)) {
       return { message: "Generation stopped.", retryable: true };
     }
-    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(error.message)) {
+    if (/fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(raw)) {
       return {
         message: "Delter AI could not reach the AI provider. Check the server's network connection and retry.",
         retryable: true,
       };
     }
-    if (/timeout/i.test(error.message)) {
+    if (/timeout/i.test(raw)) {
       return { message: "The provider took too long to respond. Please retry.", retryable: true };
     }
-    return { message: `Unable to generate the response: ${error.message}`, retryable: true };
+    return { message: `Unable to generate the response: ${raw}`, retryable: true };
   }
 
   return { message: "Unable to generate the response. Please retry.", retryable: true };

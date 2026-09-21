@@ -2,14 +2,16 @@
   "name": "delter-ai",
   "version": "0.6.0",
   "private": true,
-  "description": "Delter AI — unified AI productivity and creation workspace by Delter Technologies.",
+  "description": "Delter AI \u2014 unified AI productivity and creation workspace by Delter Technologies.",
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
     "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start -p 3000 -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset",
     "setup": "prisma generate && prisma db push && node scripts/ensure-runtime-dirs.mjs"

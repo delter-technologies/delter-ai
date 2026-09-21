@@ -17,7 +17,7 @@ provider's dashboard), it says so.
 | Hosting | Vercel Hobby, or any Node host (Railway, Fly.io, Render) | Yes |
 | PostgreSQL | Neon free tier, Supabase free tier | Yes |
 | Object storage | Cloudflare R2 (10 GB), Supabase Storage (1 GB) | Only when `STORAGE_DRIVER=s3` — required on serverless |
-| Password-reset email | Resend (3k/month) | No — the UI reports honestly that no sender is configured |
+| Password-reset email | Resend (3k/month) | No — but without `RESET_EMAIL_URL`, production creates no reset token at all and the UI says so |
 | AI provider credit | none; OpenRouter credit is the cheapest single top-up | Yes, for live AI |
 
 AI credit is the only unavoidable cost. A key that authenticates with an empty
@@ -47,17 +47,30 @@ docker run --name delter-pg -e POSTGRES_PASSWORD=delter -e POSTGRES_DB=delter_ai
 # DATABASE_URL="postgresql://postgres:delter@127.0.0.1:5432/delter_ai"
 ```
 
-Apply the schema once the URL is set:
+Apply the schema once the URL is set.
+
+**Production** — the repository carries a committed initial migration
+(`prisma/migrations/0_init`), so a fresh production database is created from a
+reviewed artefact:
 
 ```bash
-DATABASE_URL="postgresql://…" npx prisma db push
+DATABASE_URL="postgresql://…" npx prisma migrate deploy   # or: npm run db:migrate
 ```
 
-> **Before production data matters:** `db push` has no migration history — it is the
-> right tool for development and for a first deploy. Once the database holds data you
-> care about, switch to `prisma migrate dev` (creates versioned migrations) and
-> `prisma migrate deploy` (applies them on the host), so a schema change is a
-> reviewed artefact rather than a diff applied live.
+Verified against an empty PostgreSQL 17 database: all ten tables, their indexes and
+foreign keys are created, and `prisma migrate diff` then reports no difference
+between the database and `prisma/schema.prisma`.
+
+**Development** — `db push` is the quicker loop and needs no migration history:
+
+```bash
+DATABASE_URL="postgresql://…" npx prisma db push          # or: npm run setup
+```
+
+> Later schema changes: run `prisma migrate dev --name <change>` so a new migration
+> is committed alongside the schema, and let the host apply it with
+> `prisma migrate deploy`. Once a database holds data you care about, avoid
+> `db push` — it diffs live rather than replaying reviewed SQL.
 
 ---
 
@@ -103,6 +116,16 @@ instead of falling back to disk, and a refused write surfaces the store's own re
 in the upload UI — with no `FileAsset` row created, so the file list never claims an
 upload that did not happen.
 
+Two further refusals matter on a serverless host:
+
+- **`STORAGE_DRIVER` must be set explicitly in production.** Development defaults to
+  `local` so a fresh clone works; production does not guess, because defaulting to
+  disk on a serverless host would accept uploads and then lose them when the
+  container is recycled.
+- **`STORAGE_DRIVER=local` is refused when `VERCEL` is set**, with an error that
+  explains the read-only, per-request filesystem and points at `s3`. Run on a host
+  with a persistent volume if you want local disk.
+
 ---
 
 ## 3. Environment variables
@@ -110,8 +133,8 @@ upload that did not happen.
 | Variable | Example | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | `postgresql://user:pass@host-pooler/db?sslmode=require` | Pooled URL on serverless |
-| `SESSION_SECRET` | 32+ random bytes | `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
-| `STORAGE_DRIVER` | `s3` | `local` on a host with a volume |
+| `SESSION_SECRET` | 32+ random bytes | **Required in production**; `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` |
+| `STORAGE_DRIVER` | `s3` | **Required in production**; `local` only on a host with a persistent volume, and never on Vercel |
 | `S3_ENDPOINT` | `https://<account-id>.r2.cloudflarestorage.com` | Omit for AWS S3 |
 | `S3_REGION` | `auto` | R2 uses `auto`; AWS uses a real region |
 | `S3_BUCKET` | `delter-ai-uploads` | |
@@ -123,10 +146,26 @@ upload that did not happen.
 | `OPENROUTER_APP_NAME` / `OPENROUTER_APP_URL` | `Delter AI` / `https://your-domain` | Attribution headers |
 | `AI_MAX_OUTPUT_TOKENS` | `2048` | See README — uncapped requests get refused by credit-holding providers |
 | `MAX_UPLOAD_MB` | `25` | |
-| `RESET_EMAIL_URL` | `https://your-domain/reset-password` | Unset = no email delivery, stated plainly in the UI |
+| `RESET_EMAIL_URL` | `https://your-delivery-endpoint/send` | A POST endpoint that sends the email. Unset in production = no reset token is created |
 
 `SESSION_SECRET` rotation signs out every session immediately — that is the intended
 behaviour, not a bug.
+
+### Production guards
+
+These are refusals, not fallbacks. Each one exists because the alternative would
+look like a working deployment while behaving dangerously.
+
+| Situation | What happens |
+| --- | --- |
+| `SESSION_SECRET` unset or shorter than 32 characters in production | The request fails with an error naming the variable and how to generate one. Session and reset tokens are HMAC-signed with it, and the development fallback is public in this repository. |
+| `SESSION_SECRET` unset in development | The server starts with the labelled development fallback and warns once in the log. |
+| `STORAGE_DRIVER` unset in production | Uploads fail with an error naming the variable (and pointing at `s3` when `VERCEL` is set). |
+| `STORAGE_DRIVER=local` on Vercel | Refused with an explanation: the filesystem is read-only and per-request. |
+| `RESET_EMAIL_URL` unset in production | No reset token is created. The response is identical for every address, so the endpoint cannot be used to enumerate accounts, and the UI states that reset is unavailable. |
+| `RESET_EMAIL_URL` unset in development | The reset link is returned in the response and shown in the UI, marked as a development behaviour. |
+| A client bundle imports a module that can read a provider key | The build fails: those modules import `server-only`. |
+| An unexpected error | The client receives a generic message plus a request id; the detail stays in the server log. Error text that is returned is redacted of keys, bearer tokens, AWS signatures and database URLs with embedded passwords. |
 
 ---
 
@@ -134,18 +173,19 @@ behaviour, not a bug.
 
 1. [vercel.com/new](https://vercel.com/new) → import `delter-technologies/delter-ai`.
 2. Framework preset **Next.js** is detected. Build `npm run build`, output `.next` —
-   leave both at their defaults. The build script runs `prisma generate` first, so
-   the git-ignored client is produced on the host.
+   leave both at their defaults. The build script runs `prisma generate` first, and
+   `postinstall` runs it too, so the git-ignored client is produced on the host
+   either way. `DATABASE_URL` and `SESSION_SECRET` must be present at build time.
 3. Add every variable from section 3 (Environment Variables → add, apply to
    Production and Preview as appropriate).
 4. Deploy.
 5. Create the schema against the production database once, from a machine with the
    production `DATABASE_URL`:
    ```bash
-   DATABASE_URL="postgresql://…" npx prisma db push
+   DATABASE_URL="postgresql://…" npx prisma migrate deploy
    ```
-   Vercel functions do not run migrations for you, and the app does not create tables
-   at request time.
+   This applies the committed `prisma/migrations/0_init`. Vercel functions do not run
+   migrations for you, and the app does not create tables at request time.
 6. Run the checklist in section 6.
 
 **Known Vercel constraints**
@@ -169,10 +209,10 @@ Any host that runs a long-lived Node process with a persistent volume (Railway,
 Fly.io, Render, a VPS) works:
 
 ```bash
-npm ci
-npx prisma db push     # once, with the production DATABASE_URL
+npm ci                      # postinstall runs prisma generate
+npx prisma migrate deploy   # once, with the production DATABASE_URL
 npm run build
-npm start              # listens on PORT/3000
+npm start                   # listens on PORT/3000
 ```
 
 - `STORAGE_DRIVER=local` keeps uploads on the volume — no object store needed.
@@ -206,14 +246,26 @@ Work through these on the deployed URL; each one exercises a different subsystem
    the URL. It must be refused, not rendered.
 8. **No secrets in the repo**: `git ls-files | grep -E '^\.env$|/data/'` returns
    nothing.
+9. **Guards**: on a preview deployment, unset `STORAGE_DRIVER` and confirm an upload
+   fails with an operator-facing error rather than writing to an ephemeral disk;
+   unset `RESET_EMAIL_URL` and confirm the forgot-password form says reset is
+   unavailable instead of returning a link. Restore both afterwards.
+10. **Password reset end to end** (once `RESET_EMAIL_URL` points at a real sender):
+    request a reset, follow the emailed link, set a new password, and confirm the
+    old password stops working and existing sessions are signed out.
 
 ---
 
 ## 7. Current limits (unchanged by deploying)
 
-- **Password-reset email is not wired to a sender.** The flow generates a token and
-  the UI says plainly that no email delivery is configured. Add a transactional email
-  provider and a send call in the reset route to complete it.
+- **Password-reset delivery needs your email provider.** The route is complete and
+  verified: with `RESET_EMAIL_URL` set it POSTs `{ to, type, resetPath, product }` to
+  that endpoint, returns only a neutral confirmation, and the token is single-use,
+  expires in an hour and revokes every session when used. What the repository cannot
+  supply is the sender itself — point `RESET_EMAIL_URL` at a Resend/Postmark/SES
+  webhook (or any small function that calls one). Until then, production creates no
+  token and the UI says password reset is unavailable; in development the link is
+  shown in the response so the flow stays testable.
 - **Billing is not enabled.** Usage is metered and shown; no plans, no payments, no
   enforced limits. The Settings billing tab says so instead of showing dead controls.
 - **No self-service account deletion.** Settings explains what an operator would

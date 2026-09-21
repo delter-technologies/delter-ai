@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { config } from "@/lib/config";
+import { redactSecrets } from "@/lib/redact";
 import { storageDriver } from "@/lib/storage-drivers";
 import { absoluteStoragePath } from "@/lib/storage-drivers/local";
 
@@ -183,7 +184,11 @@ export async function storageUsageBytes(userId: string): Promise<number> {
  * cannot swamp the upload list.
  */
 export function storageFailureMessage(error: unknown): string {
-  const detail = error instanceof Error ? error.message.replace(/\s+/g, " ").trim() : "";
+  // Storage SDK errors can include access keys, signed URLs or endpoint credentials.
+  const detail =
+    error instanceof Error
+      ? redactSecrets(error.message).replace(/\s+/g, " ").trim()
+      : "";
   const base = "The file could not be saved to storage.";
   if (!detail) return `${base} Please retry.`;
   const clipped = detail.length > 300 ? `${detail.slice(0, 299)}…` : detail;
@@ -200,8 +205,9 @@ export function formatBytes(bytes: number): string {
 
 /** Idempotent start-up work for the active driver (mkdir for local, config check for s3). */
 export async function ensureRuntimeDirs() {
-  await storageDriver().prepare();
-  if (config.storageDriver === "local") {
+  const driver = storageDriver();
+  await driver.prepare();
+  if (driver.id === "local") {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(path.resolve(process.cwd(), "data"), { recursive: true });
   }

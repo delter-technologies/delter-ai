@@ -87,7 +87,8 @@ meter → delete) against a real S3-compatible endpoint. The failure path is ver
 too: when the store refuses a write, the upload is reported as failed with the
 store's own reason and **no** `FileAsset` row is created.
 
-Other scripts: `npm start`, `npm run db:push`, `npm run db:studio`.
+Other scripts: `npm start`, `npm run db:migrate` (applies `prisma/migrations` to a
+database), `npm run db:push`, `npm run db:studio`.
 
 ---
 
@@ -96,13 +97,13 @@ Other scripts: `npm start`, `npm run db:push`, `npm run db:studio`.
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string. On a serverless host use the **pooled** URL (Neon's `-pooler` host): per-request scaling exhausts a direct connection limit. |
-| `SESSION_SECRET` | Signs and verifies session cookies. Required in production; the dev fallback is deliberately labelled as unsafe. |
+| `SESSION_SECRET` | Signs and verifies session and password-reset tokens. **Required in production** (at least 32 characters): without it the server refuses to serve authenticated routes instead of falling back to a secret that is public in this repository. Development keeps a fallback and warns in the server log. |
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Provider credentials, read server-side at request time. Provide at least one. |
 | `OPENROUTER_APP_NAME` / `OPENROUTER_APP_URL` | Attribution headers OpenRouter asks for. |
 | `MAX_UPLOAD_MB` | Upload cap (default 25). |
 | `AI_MAX_OUTPUT_TOKENS` | Default output cap per request (default 2048). See below — this one matters for money. |
-| `RESET_EMAIL_URL` | Where password-reset links point. Unset means no email delivery, which the UI states plainly. |
-| `STORAGE_DRIVER` | `local` (default, disk under `STORAGE_ROOT`) or `s3` (any S3-compatible object store). An unrecognised value throws rather than silently falling back to disk. |
+| `RESET_EMAIL_URL` | A delivery endpoint that receives `{ to, type, resetPath, product }` by POST and sends the email. Unset in development, the reset link is returned in the response so recovery is testable; unset in production, **no token is created at all** and the UI says password reset is not available on that server. |
+| `STORAGE_DRIVER` | `local` (disk under `STORAGE_ROOT`) or `s3` (any S3-compatible object store). Development defaults to `local`; **production must set it explicitly**, and `local` is refused when the process is running on Vercel, whose filesystem is read-only and per-request. An unrecognised value throws rather than silently falling back to disk. |
 | `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` | Object store location. R2 uses `https://<account-id>.r2.cloudflarestorage.com` with region `auto`; omit the endpoint for AWS S3. |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | Object store credentials. Server-side only; never echoed in an error message or in the Settings description. |
 | `S3_PREFIX` / `S3_FORCE_PATH_STYLE` | Optional key prefix (one bucket, several environments) and addressing style (path-style is what R2, Supabase and MinIO expect). |
@@ -174,9 +175,18 @@ git-ignored Prisma client is produced on the host rather than committed.
 2. Framework preset: **Next.js** (auto-detected). Build command `npm run build`,
    output directory `.next` — both defaults, nothing to override.
 3. Add the environment variables: `DATABASE_URL` (pooled Postgres),
-   `SESSION_SECRET`, `STORAGE_DRIVER=s3` plus the `S3_*` values, and at least one
-   AI provider key.
-4. Deploy, then run the post-deploy checklist in DEPLOY.md.
+   `SESSION_SECRET` (32+ characters), `STORAGE_DRIVER=s3` plus the `S3_*` values,
+   `RESET_EMAIL_URL` if you want password recovery, and at least one AI provider key.
+4. Deploy.
+5. Create the schema on the production database once, from a machine that has the
+   production `DATABASE_URL`:
+   ```bash
+   DATABASE_URL="postgresql://…" npx prisma migrate deploy
+   ```
+   `prisma/migrations/0_init` is committed, so this applies exactly the reviewed
+   schema. Vercel functions do not run migrations, and the app never creates tables
+   at request time.
+6. Run the post-deploy checklist in DEPLOY.md.
 
 The schema is already PostgreSQL and the object-storage driver is already written,
 so deploying is configuration, not a rewrite. Two things still deserve attention:
@@ -184,9 +194,30 @@ so deploying is configuration, not a rewrite. Two things still deserve attention
 - **Streaming duration.** `src/app/api/ai/stream` declares `maxDuration = 300`,
   which serverless hosts clamp to their plan limit (10 s on Vercel Hobby, 60 s with
   Fluid compute). A long generation can be cut off at that boundary.
-- **Migrations.** The schema is applied with `prisma db push`, which is right for
-  development. Before a production database holds data you care about, adopt
-  `prisma migrate dev` → `prisma migrate deploy` so changes are versioned.
+- **Migrations.** `prisma/migrations/0_init` is committed and applies cleanly to an
+  empty PostgreSQL database (`prisma migrate deploy`, verified). Use
+  `prisma migrate dev` for later schema changes so every deploy stays versioned;
+  `prisma db push` remains the development shortcut.
+
+### Production guards
+
+Deliberate refusals, so a misconfigured deploy fails visibly instead of quietly:
+
+- No `SESSION_SECRET` (or one shorter than 32 characters) in production → the
+  request fails with an error naming the variable. Sessions are HMAC-signed with it,
+  so a guessable fallback would allow forged cookies.
+- No `STORAGE_DRIVER` in production → uploads fail with an error naming the
+  variable; `STORAGE_DRIVER=local` on Vercel → an error explaining why `s3` is
+  required. Nothing silently switches storage backends.
+- `RESET_EMAIL_URL` unset in production → no reset token is created, and the
+  response is identical for every address, so the endpoint cannot enumerate
+  accounts.
+- Modules that can see a provider key or a storage credential import
+  `server-only`, so a client bundle that reaches for them fails the build.
+- Error text that leaves the server is redacted: API keys, bearer tokens, AWS
+  signatures and database URLs with embedded passwords never reach a browser.
+  Unexpected failures return a generic message plus a request id that only appears
+  in the server log.
 
 ### Or as a plain Node server
 

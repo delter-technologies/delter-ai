@@ -16,30 +16,53 @@ export const SESSION_TTL_LONG_MS = 1000 * 60 * 60 * 24 * 60; // 60 days
 /** Password-reset links expire quickly. */
 export const RESET_TOKEN_TTL_MS = 1000 * 60 * 60; // 1 hour
 
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/** The development fallback is public in this repository, so it is never usable in production. */
+const DEV_SESSION_SECRET = "delter-ai-dev-secret-do-not-use-in-production";
+const MIN_SESSION_SECRET_LENGTH = 32;
+
+/**
+ * Resolve the secret used to HMAC session and password-reset tokens.
+ *
+ * A missing or short secret in production would let anyone who reads this
+ * repository forge a session cookie for any account, so production refuses to
+ * boot without one. Development keeps the convenience fallback and says so out
+ * loud in the server log.
+ */
+function resolveSessionSecret(): string {
+  const secret = (process.env.SESSION_SECRET ?? "").trim();
+
+  if (secret.length >= MIN_SESSION_SECRET_LENGTH) return secret;
+
+  if (IS_PRODUCTION) {
+    throw new Error(
+      `SESSION_SECRET must be set to at least ${MIN_SESSION_SECRET_LENGTH} characters in production` +
+        (secret ? ` (the provided value is ${secret.length}).` : ", but it is not set.") +
+        " Without it, session and password-reset tokens could be forged. Generate one with:" +
+        " node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"",
+    );
+  }
+
+  if (!secret) {
+    console.warn(
+      "[delter-ai] SESSION_SECRET is not set — falling back to a development-only secret. Sessions are forgeable; never deploy this configuration.",
+    );
+  }
+  return secret || DEV_SESSION_SECRET;
+}
+
 export const config = {
   sessionCookie: SESSION_COOKIE,
-  /**
-   * A stable secret used for hashing session tokens and IPs. Falls back to a
-   * development constant so a fresh clone still boots — production deploys must
-   * set SESSION_SECRET.
-   */
-  sessionSecret: process.env.SESSION_SECRET || "delter-ai-dev-secret-do-not-use-in-production",
-  isProduction: process.env.NODE_ENV === "production",
+  /** Stable secret used for hashing session tokens and IPs. See resolveSessionSecret. */
+  sessionSecret: resolveSessionSecret(),
+  isProduction: IS_PRODUCTION,
   maxUploadBytes: (Number(process.env.MAX_UPLOAD_MB) || 25) * 1024 * 1024,
   /** Absolute path of the on-disk storage root for user uploads (local driver). */
   storageRoot: process.env.STORAGE_ROOT || `${process.cwd()}/data/storage`,
-  /**
-   * Where uploaded file bytes live.
-   *
-   * `local` writes under `storageRoot` — right for a machine or a container with
-   * a persistent volume. `s3` talks to any S3-compatible object store
-   * (Cloudflare R2, Supabase Storage, AWS S3, MinIO) and is what a serverless
-   * host needs, because its filesystem is read-only and per-request.
-   *
-   * Only the driver changes: metadata stays in the database either way, and the
-   * key recorded on a FileAsset row means the same thing in both.
-   */
-  storageDriver: (process.env.STORAGE_DRIVER || "local") as "local" | "s3",
+  // The active storage driver is resolved in @/lib/storage-drivers, which is the
+  // single source of truth for STORAGE_DRIVER (and refuses to guess in
+  // production). `storageRoot` and `s3` below are that module's inputs.
   s3: {
     endpoint: process.env.S3_ENDPOINT || undefined,
     region: process.env.S3_REGION || "auto",

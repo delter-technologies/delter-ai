@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Field";
 
 type DeliveryResult = {
-  delivery: "sent" | "dev" | "none";
+  delivery: "sent" | "dev" | "none" | "unavailable";
   message: string;
   resetPath?: string;
 };
@@ -24,6 +24,9 @@ type DeliveryResult = {
  *               staging deployment, and it makes recovery testable.
  *   - `none`  → the address is not registered. The neutral message is shown so
  *               this form cannot be used to enumerate accounts.
+ *   - `unavailable` → a production server with no delivery endpoint configured.
+ *               No link was created and none is shown; the message says so
+ *               plainly rather than implying an email is on its way.
  */
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -55,21 +58,26 @@ export function ForgotPasswordForm() {
   }
 
   if (result) {
+    // Both "no email service here" outcomes are warnings, not successes.
+    const warning = result.delivery === "dev" || result.delivery === "unavailable";
+
     return (
       <div className="space-y-4">
         <div
           className="rounded-lg border p-4"
           style={{
-            borderColor: result.delivery === "dev" ? "color-mix(in srgb, var(--warning) 35%, var(--border))" : "var(--border)",
-            background: result.delivery === "dev" ? "var(--warning-soft)" : "var(--success-soft)",
+            borderColor: warning ? "color-mix(in srgb, var(--warning) 35%, var(--border))" : "var(--border)",
+            background: warning ? "var(--warning-soft)" : "var(--success-soft)",
           }}
         >
-          <p className="text-[13px] font-semibold" style={{ color: result.delivery === "dev" ? "var(--warning)" : "var(--success)" }}>
+          <p className="text-[13px] font-semibold" style={{ color: warning ? "var(--warning)" : "var(--success)" }}>
             {result.delivery === "sent"
               ? "Reset link sent"
               : result.delivery === "dev"
                 ? "No email service configured — link shown here"
-                : "Request received"}
+                : result.delivery === "unavailable"
+                  ? "Password reset is not available on this server"
+                  : "Request received"}
           </p>
           <p className="mt-1.5 text-[13px] leading-relaxed text-fg-secondary">{result.message}</p>
 

@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { AiProvider, ChatMessage, ModelInfo, ProviderRequest, StreamChunk } from "../types";
 import { ProviderError } from "../types";
 import { parseSse, readJsonError } from "../errors";

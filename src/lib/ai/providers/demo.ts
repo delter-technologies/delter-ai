@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { AiProvider, ModelInfo, ProviderRequest, StreamChunk } from "../types";
 
 const MODEL_ID = "delter-demo";

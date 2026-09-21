@@ -17,12 +17,34 @@ let cached: StorageDriver | null = null;
 let cachedFor: string | null = null;
 
 function resolveId(): StorageDriverId {
-  const raw = String(process.env.STORAGE_DRIVER || "local").trim().toLowerCase();
+  const raw = String(process.env.STORAGE_DRIVER ?? "").trim().toLowerCase();
+  const isProduction = process.env.NODE_ENV === "production";
+  const onVercel = Boolean(process.env.VERCEL);
+
+  if (!raw) {
+    // Development defaults to disk so a fresh clone works with no configuration.
+    if (!isProduction) return "local";
+    throw new Error(
+      `STORAGE_DRIVER must be set explicitly in production: "s3" for a serverless host, or "local" for a host with a persistent volume.${
+        onVercel
+          ? ' This process is running on Vercel, whose filesystem is read-only and per-request, so STORAGE_DRIVER="s3" is required.'
+          : ""
+      } Delter AI will not guess, because defaulting to "local" on a serverless host would accept uploads and then lose them.`,
+    );
+  }
+
   if (raw !== "local" && raw !== "s3") {
     throw new Error(
       `STORAGE_DRIVER must be "local" (disk) or "s3" (object storage), but the server environment says "${raw}".`,
     );
   }
+
+  if (raw === "local" && onVercel) {
+    throw new Error(
+      'STORAGE_DRIVER="local" cannot work on Vercel: the filesystem is read-only and each request may run on a fresh container, so uploads would fail or disappear. Set STORAGE_DRIVER="s3" with an S3-compatible bucket (see DEPLOY.md), or run Delter AI on a host with a persistent volume.',
+    );
+  }
+
   return raw;
 }
 
