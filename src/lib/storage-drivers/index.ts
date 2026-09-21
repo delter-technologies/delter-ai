@@ -56,9 +56,22 @@ export function storageDriver(): StorageDriver {
   return cached;
 }
 
-/** Honest one-liner for the Settings screen: where bytes actually go. */
+/**
+ * Honest one-liner for the Settings screen: where bytes actually go.
+ *
+ * A server whose storage is misconfigured still has to render Settings — the
+ * panel then says exactly what is wrong, instead of the whole page failing to
+ * load. Uploads keep failing loudly, because they call `storageDriver()`
+ * directly and that throws.
+ */
 export function storageDescription(): string {
-  return storageDriver().describe();
+  try {
+    return storageDriver().describe();
+  } catch (error) {
+    // Read as part of a sentence in Settings → Account ("Uploaded file bytes live
+    // in …"), so it starts as a noun phrase and then says what to fix.
+    return `an unconfigured storage backend: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 export type { StorageDriver, StorageDriverId };
