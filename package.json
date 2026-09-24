@@ -2,7 +2,7 @@
   "name": "delter-ai",
   "version": "0.6.0",
   "private": true,
-  "description": "Delter AI \u2014 unified AI productivity and creation workspace by Delter Technologies.",
+  "description": "Delter AI — unified AI productivity and creation workspace by Delter Technologies.",
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
     "build": "prisma generate && next build",
@@ -31,6 +31,7 @@
     "@codemirror/view": "6.43.12",
     "@lezer/highlight": "1.2.3",
     "@prisma/client": "6.19.3",
+    "@vercel/analytics": "2.0.1",
     "bcryptjs": "3.0.3",
     "next": "16.3.5",
     "react": "19.3.0",

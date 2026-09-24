@@ -188,6 +188,14 @@ look like a working deployment while behaving dangerously.
    migrations for you, and the app does not create tables at request time.
 6. Run the checklist in section 6.
 
+**Web Analytics.** The root layout mounts `<Analytics />` from `@vercel/analytics`,
+so page views are collected once the deployment is on Vercel (enable Web Analytics in
+the project dashboard; data appears within about 30 s). It is cookieless and reads no
+environment variables of this app. On a self-hosted deploy the component still renders
+its script tag, but `/_vercel/insights/script.js` is a Vercel-platform path, so the
+request 404s harmlessly and nothing is collected — remove the component from
+`src/app/layout.tsx` if you would rather not see that request.
+
 **Known Vercel constraints**
 
 - **Function duration.** `src/app/api/ai/stream` declares `maxDuration = 300`. Hobby

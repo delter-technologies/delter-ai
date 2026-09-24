@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import { Analytics } from "@vercel/analytics/next";
 import { ThemeScript } from "@/components/system/ThemeScript";
 import { Providers } from "@/components/system/Providers";
 
@@ -47,6 +48,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <Providers>{children}</Providers>
+        {/*
+          Vercel Web Analytics: page views for the deployed site. It loads
+          /_vercel/insights/script.js, which the Vercel platform serves; on a
+          self-hosted deploy that request simply does not resolve and nothing is
+          collected. No cookies, and it reads no environment secrets.
+        */}
+        <Analytics />
       </body>
     </html>
   );
